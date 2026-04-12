@@ -98,7 +98,7 @@ agent-arch/
 
 - ✅ **SESSION 1**: Broken Platform Setup - /roadmap/session-1.md
 - ✅ **SESSION 2**: Teaching Assistant Interface - /roadmap/session-2.md
-- **SESSION 3**: Agent Template + Dashboard - /roadmap/session-3.md
+- ✅ **SESSION 3**: Agent Template + Dashboard - /roadmap/session-3.md
 - **SESSION 4**: Curriculum Content - /roadmap/session-4.md
 - **SESSION 5**: Code Review + Progress Tracking - /roadmap/session-5.md
 - **SESSION 6**: Polish & Final Integration - /roadmap/session-6.md
