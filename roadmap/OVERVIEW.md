@@ -99,7 +99,7 @@ agent-arch/
 - ✅ **SESSION 1**: Broken Platform Setup - /roadmap/session-1.md
 - ✅ **SESSION 2**: Teaching Assistant Interface - /roadmap/session-2.md
 - ✅ **SESSION 3**: Agent Template + Dashboard - /roadmap/session-3.md
-- **SESSION 4**: Curriculum Content - /roadmap/session-4.md
+- ✅ **SESSION 4**: Curriculum Content - /roadmap/session-4.md
 - **SESSION 5**: Code Review + Progress Tracking - /roadmap/session-5.md
 - **SESSION 6**: Polish & Final Integration - /roadmap/session-6.md
 
@@ -150,17 +150,19 @@ agent-arch/
 
 - [x] **SESSION 1:** Broken Platform Setup
 - [x] **SESSION 2:** Teaching Assistant Interface
-- [ ] **SESSION 3:** Agent Template + Dashboard
-- [ ] **SESSION 4:** Curriculum Content
+- [x] **SESSION 3:** Agent Template + Dashboard
+- [x] **SESSION 4:** Curriculum Content
 - [ ] **SESSION 5:** Code Review + Progress Tracking
 - [ ] **SESSION 6:** Polish & Final Integration
 
-**Current Session:** SESSION 3
+**Current Session:** SESSION 5
 **Started:** 2026-04-11
 **Session 1 Completed:** 2026-04-12
 **Session 2 Completed:** 2026-04-12
+**Session 3 Completed:** 2026-04-12
+**Session 4 Completed:** 2026-04-12
 
 ---
 
-*Last Updated: 2026-04-12 (Session 3 complete)*
+*Last Updated: 2026-04-12 (Session 4 complete)*
 *Next Review: After each session completion*

@@ -65,6 +65,82 @@ if (stepResult.success === false) {
 }
 ```
 
+## Task Dependency Graph Visualised
+
+```
+"Schedule a meeting with Sarah about the roadmap"
+
+  Step 1: classifyIntent()
+          │
+          ▼
+  Step 2a: listEvents()          Step 2b: (wait)
+  [find Sarah's free slots]
+          │
+          ▼
+  Step 3: addEvent()
+  [create calendar event]
+          │
+          ▼
+  Step 4: sendEmail()
+  [send invite to Sarah]
+          │
+          ▼
+         done
+
+  Steps 2a → 3 → 4 are sequential (each depends on the previous).
+  No parallel paths here — order matters.
+```
+
+## In the Codebase
+
+Open `src/agents/task-automator/core/intent.ts`. The `classifyIntent()` stub is the entry point for task decomposition — it determines *what* the user wants before the agent plans *how* to do it. Getting intent classification right is a prerequisite for multi-step execution.
+
+## Hints
+
+For the multi-step task exercise, start by hardcoding the plan for the "schedule meeting" scenario. Don't try to make the plan dynamic yet — get the sequence working first. Once `classifyIntent()` correctly returns `SCHEDULE_MEETING`, trigger the hardcoded four-step sequence and log each result. Then generalise.
+
+## Quiz
+
+**Q1.** Your agent has a 4-step plan. Step 2 fails. What's the best response?
+
+- A) Immediately fail the whole task and tell the user
+- B) Skip step 2 and continue with step 3
+- C) Ask the model: given this failure, should we retry, try a different approach, or surface it to the user?
+- D) Retry step 2 ten times before giving up
+
+> **Answer:** C — The right recovery depends on context. The model knows the overall goal; it can reason about whether step 3 still makes sense without step 2's result.
+
+---
+
+**Q2.** What's the key advantage of an agent that replans at every step vs. one that plans once upfront?
+
+- A) Replanning is always faster
+- B) A single upfront plan is always more accurate
+- C) Replanning adapts to new information discovered during execution (e.g., the calendar was already full)
+- D) There is no practical difference
+
+> **Answer:** C — Real-world conditions change. A plan made before checking Sarah's calendar might be invalid once you see she has a full week. Replanning lets the agent respond to what it actually discovers.
+
+## Deep Dive: Sub-agent Orchestration
+
+For large, parallelisable tasks, a single agent loop becomes a bottleneck. The solution: an orchestrator agent that spawns specialised sub-agents and collects their results.
+
+```typescript
+// Orchestrator
+const results = await Promise.all([
+  subAgent.run('Research competitor pricing'),
+  subAgent.run('Summarise last quarter emails'),
+  subAgent.run('List overdue calendar tasks'),
+]);
+
+// Synthesise
+const summary = await llm.synthesise(results);
+```
+
+Each sub-agent runs independently with its own tool set and context. The orchestrator only sees the final results, keeping its context window small.
+
+This pattern is useful when tasks are **independent** (no step depends on another) and **time-sensitive** (you need results fast). Be careful: each sub-agent adds latency and cost, and coordinating failures across multiple agents is more complex than handling them in a single loop.
+
 ## Questions to Consider
 
 - How would you handle a plan where step 3 becomes impossible after step 2 succeeds?

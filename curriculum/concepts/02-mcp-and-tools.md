@@ -62,6 +62,68 @@ async function sendEmail(args: EmailArgs): Promise<ToolResult> {
 
 The model needs to know when a tool fails so it can decide what to do next — retry, try a different approach, or ask the user.
 
+## The Tool Call Cycle Visualised
+
+```
+Your Code                          Claude API
+────────                           ──────────
+  │                                     │
+  │── messages + tool definitions ─────▶│
+  │                                     │
+  │◀── { type: "tool_use",             │
+  │       name: "send_email",           │
+  │       input: { to: "..." } } ───────│
+  │                                     │
+  │ [execute real function]             │
+  │                                     │
+  │── { type: "tool_result",           │
+  │     content: "Email sent" } ───────▶│
+  │                                     │
+  │◀── { type: "text",                 │
+  │       text: "Done! Email sent." } ──│
+  │                                     │
+```
+
+## In the Codebase
+
+Look at `src/agents/task-automator/tools/email.ts` and `tools/calendar.ts`. Both files have the tool descriptors defined (the `input_schema` objects) but the implementations throw `"not implemented"`. Your job in the Email Integration exercise is to fill these in.
+
+The tool descriptors are what the model reads. The implementation functions are what your code runs.
+
+## Hints
+
+When you implement `sendEmail()`, you don't need to connect to Gmail right away. Start by logging the arguments to the console — this lets you test the full tool-call cycle end-to-end before adding real I/O. Once the model is correctly calling the tool and you can see the right arguments arriving, *then* wire up the actual email sender.
+
+## Quiz
+
+**Q1.** Why does an agent need tools instead of just using the LLM's built-in knowledge?
+
+- A) LLMs can't reason without tools
+- B) Tools give the agent the ability to take actions and access real-time data beyond what the LLM knows
+- C) Tools make the agent faster by skipping LLM calls
+- D) Tools are only needed for advanced agents
+
+> **Answer:** B — An LLM's knowledge is frozen at training time. Tools let it read your inbox, check today's calendar, and actually send emails.
+
+---
+
+**Q2.** A tool call fails with a `503 Service Unavailable` error. What should the agent do?
+
+- A) Return the error directly to the user as-is
+- B) Crash immediately to avoid further errors
+- C) Return a structured failure result so the model can decide whether to retry or try a different approach
+- D) Silently ignore the failure and continue
+
+> **Answer:** C — The model needs to know the tool failed so it can reason about the next action. Crashing or hiding failures breaks the feedback loop.
+
+## Deep Dive: Tool Design Principles
+
+**Narrow beats broad.** A tool named `manage_email` with 15 parameters is hard for the model to use correctly. Split it: `send_email`, `read_inbox`, `search_emails`, `archive_email`. Each does one thing clearly.
+
+**Idempotency matters.** If a tool call might be retried, make it safe to call twice. Sending the same email twice is bad. Querying a calendar twice is fine.
+
+**Confirm before irreversible actions.** Deleting a file, sending an email to a large list, posting publicly — these should have a confirmation step. One pattern: add a `dryRun: boolean` parameter to destructive tools. When `dryRun: true`, describe what *would* happen without doing it. Let the model show the plan to the user before executing.
+
 ## Questions to Consider
 
 - What happens if the model calls a tool that doesn't exist?

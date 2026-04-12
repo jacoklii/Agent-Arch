@@ -73,6 +73,103 @@ Define "give up" criteria clearly: failing to send an email after 3 retries shou
 
 Every tool call should be logged with: input, output, duration, success/failure. When something goes wrong in production, this is the only way to understand what happened.
 
+## Retry Timing Visualised
+
+```
+Attempt 1 ──▶ FAIL
+              │ wait 500ms
+Attempt 2 ──────────▶ FAIL
+                      │ wait 1000ms
+Attempt 3 ──────────────────────▶ FAIL
+                                  │ throw (max attempts reached)
+
+Timeline: ──|500ms|──────|1000ms|──────────────▶
+
+Exponential backoff: delay = baseDelay × 2^(attempt-1)
+  attempt 1: 500 × 2^0 = 500ms
+  attempt 2: 500 × 2^1 = 1000ms
+  attempt 3: 500 × 2^2 = 2000ms
+```
+
+## In the Codebase
+
+Open `src/agents/task-automator/tools/email.ts` and `tools/calendar.ts`. Both currently throw `"not implemented"` — these are the spots where real network calls will live, and where errors will happen. Once you implement them (Email Integration exercise), wrap each tool call with `withRetry()`.
+
+## Hints
+
+**Hint 1:** Don't add retry logic inside the tool functions themselves. Wrap them at the call site in the agent loop — that way you can tune retry parameters per-tool without changing the tool implementations.
+
+**Hint 2:** To test retry logic without actually waiting, pass a test-controlled delay function: `withRetry(fn, 3, 1, testDelay)` where `testDelay` is a mock that resolves immediately. Your tests stay fast without changing the production code.
+
+## Quiz
+
+**Q1.** A `sendEmail()` call returns a 400 Bad Request error (the "to" address is malformed). Should you retry?
+
+- A) Yes — retry 3 times with backoff
+- B) No — 400 means the request itself is invalid. Retrying will get the same error
+- C) Yes — maybe the server was having a bad day
+- D) Depends on the email provider
+
+> **Answer:** B — Only retry on transient errors (network issues, rate limits, server errors). An invalid request will fail every time regardless of how many retries you attempt.
+
+---
+
+**Q2.** Your agent fails to send an email after 3 retries. What should it do?
+
+- A) Silently log the error and mark the task as complete
+- B) Crash the process and restart
+- C) Surface a clear, human-readable error to the user with enough context to take action
+- D) Try a fourth time just in case
+
+> **Answer:** C — Silently dropping failures is the worst outcome. The user needs to know *what* failed and *what they can do about it* (e.g., "I couldn't send the email — your Gmail connection may have expired. Reconnect it here.").
+
+## Deep Dive: Circuit Breakers
+
+Retry logic helps with transient failures. But if a service is truly down, retrying hammers a broken system and burns your rate limit budget.
+
+A circuit breaker tracks recent failures. After N failures in a time window, it *opens* — all subsequent calls fail immediately without hitting the service. After a cooldown period, it *half-opens* to test if the service recovered.
+
+```typescript
+class CircuitBreaker {
+  private failures = 0;
+  private lastFailureTime = 0;
+  private state: 'closed' | 'open' | 'half-open' = 'closed';
+
+  async call<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === 'open') {
+      const cooldownMs = 30_000;
+      if (Date.now() - this.lastFailureTime > cooldownMs) {
+        this.state = 'half-open'; // try once
+      } else {
+        throw new Error('Circuit open — service unavailable');
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.reset();
+      return result;
+    } catch (err) {
+      this.recordFailure();
+      throw err;
+    }
+  }
+
+  private recordFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    if (this.failures >= 5) this.state = 'open';
+  }
+
+  private reset() {
+    this.failures = 0;
+    this.state = 'closed';
+  }
+}
+```
+
+Use one circuit breaker per external service. When the circuit is open, your agent can immediately tell the user "Gmail is unavailable right now" rather than waiting through three retry cycles to reach the same conclusion.
+
 ## Questions to Consider
 
 - What's the difference between a retry and a re-plan?
