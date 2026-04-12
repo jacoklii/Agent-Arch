@@ -13,6 +13,13 @@ import express from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 import { initPlatform, InitResult } from './setup/init';
+import {
+  welcomeHandler,
+  chatHandler,
+  resetChatHandler,
+  curriculumListHandler,
+  curriculumHandler,
+} from './assistant-service/chat-handler';
 
 dotenv.config();
 
@@ -115,6 +122,16 @@ app.post('/api/retry-init', async (_req, res) => {
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
+
+// ────────────────────────────────────────────────────────────
+// Teaching Assistant routes (Session 2)
+// ────────────────────────────────────────────────────────────
+
+app.get('/api/chat/welcome', welcomeHandler);
+app.post('/api/chat', chatHandler);
+app.post('/api/chat/reset', resetChatHandler);
+app.get('/api/curriculum', curriculumListHandler);
+app.get('/api/curriculum/:slug', curriculumHandler);
 
 // ────────────────────────────────────────────────────────────
 // Startup

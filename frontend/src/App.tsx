@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import LockedScreen from './components/LockedScreen';
+import AssistantChat from './components/AssistantChat';
+import ConceptViewer from './components/ConceptViewer';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -26,6 +28,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [backendDown, setBackendDown] = useState(false);
+  const [activeConcept, setActiveConcept] = useState<string | null>(null);
 
   // Fetch the current platform status from the backend
   async function fetchStatus() {
@@ -105,18 +108,26 @@ export default function App() {
     );
   }
 
-  // ── Platform is unlocked ✅ ──
+  // ── Platform is unlocked ✅ — show the teaching assistant ──
   return (
-    <div style={styles.centered}>
-      <div style={styles.successBox}>
-        <p style={styles.successTitle}>✅ Platform Unlocked</p>
-        <p style={styles.muted}>
-          You fixed it! The teaching assistant is coming in Session 2.
-        </p>
-        <p style={styles.muted}>
-          Great debugging work — that's exactly the skill you'll use to build your agent.
-        </p>
+    <div style={styles.appShell}>
+      <div style={{
+        flex: activeConcept ? '0 0 62%' : '1',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        minWidth: 0,
+      }}>
+        <AssistantChat onConceptOpen={setActiveConcept} />
       </div>
+      {activeConcept && (
+        <div style={styles.conceptPanel}>
+          <ConceptViewer
+            slug={activeConcept}
+            onClose={() => setActiveConcept(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -126,6 +137,18 @@ export default function App() {
 // ────────────────────────────────────────────────────────────
 
 const styles: Record<string, React.CSSProperties> = {
+  appShell: {
+    height: '100vh',
+    display: 'flex',
+    flexDirection: 'row',
+    background: '#0a0a0a',
+    overflow: 'hidden',
+  },
+  conceptPanel: {
+    flex: '0 0 38%',
+    borderLeft: '1px solid #1f2937',
+    overflowY: 'auto',
+  },
   centered: {
     minHeight: '100vh',
     display: 'flex',
