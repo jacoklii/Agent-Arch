@@ -97,30 +97,30 @@ agent-arch/
 ## 📋 Development Sessions
 
 ### ✅ SESSION 1: Broken Platform Setup
-**Status:** ⬜ Not Started | ⬜ In Progress | ⬜ Complete
+**Status:** ⬜ Not Started | ⬜ In Progress | ✅ Complete
 
 **Goal:** Create the locked initial state that forces users to fix the platform before they can learn.
 
 **Components to Build:**
-- [ ] Project scaffold (package.json, tsconfig, vite config)
-- [ ] Broken `backend/setup/init.ts` file with intentional errors:
-  - [ ] Missing environment variable checks
-  - [ ] Incomplete auth initialization
-  - [ ] Database connection setup (but connection string is wrong)
-  - [ ] API key validation (but validation logic is broken)
-- [ ] `.env.example` with placeholder values
-- [ ] `frontend/components/LockedScreen.tsx`:
-  - [ ] Shows error message from failed init
-  - [ ] Displays file path to fix (`backend/setup/init.ts`)
-  - [ ] Gives hints about what's broken
-  - [ ] Has a "Retry" button
-- [ ] `README.md` explaining:
-  - [ ] What this project is
-  - [ ] How to get started
-  - [ ] What you'll learn
-  - [ ] First steps to unlock the platform
-- [ ] Basic Express server that checks if init is complete
-- [ ] Simple React app that shows locked/unlocked state
+- [x] Project scaffold (package.json, tsconfig, vite config)
+- [x] Broken `backend/src/setup/init.ts` file with intentional errors:
+  - [x] Missing environment variable checks (=== null vs undefined bug)
+  - [x] Incomplete auth initialization (accepts 1-char secret instead of 32+)
+  - [x] Database connection setup (missing fs.mkdirSync before SQLite open)
+  - [x] API key validation (inverted startsWith logic with === false)
+- [x] `.env.example` with placeholder values
+- [x] `frontend/src/components/LockedScreen.tsx`:
+  - [x] Shows error message from failed init
+  - [x] Displays file path to fix (`backend/src/setup/init.ts`)
+  - [x] Gives hints about what's broken (expandable per-error hints)
+  - [x] Has a "Retry" button (calls /api/retry-init, no restart needed)
+- [x] `README.md` explaining:
+  - [x] What this project is
+  - [x] How to get started
+  - [x] What you'll learn
+  - [x] First steps to unlock the platform
+- [x] Basic Express server that checks if init is complete
+- [x] Simple React app that shows locked/unlocked state
 
 **What Users Fix:**
 1. Read the error messages
@@ -695,18 +695,18 @@ The assistant can call these functions:
 
 ## 🔄 Session Progress Tracker
 
-- [ ] **SESSION 1:** Broken Platform Setup
+- [x] **SESSION 1:** Broken Platform Setup
 - [ ] **SESSION 2:** Teaching Assistant Interface
 - [ ] **SESSION 3:** Agent Template + Dashboard
 - [ ] **SESSION 4:** Curriculum Content
 - [ ] **SESSION 5:** Code Review + Progress Tracking
 - [ ] **SESSION 6:** Polish & Final Integration
 
-**Current Session:** SESSION 1
-**Started:** [Date]
-**Estimated Completion:** [Date]
+**Current Session:** SESSION 2
+**Started:** 2026-04-11
+**Session 1 Completed:** 2026-04-12
 
 ---
 
-*Last Updated: [Current Date]*
+*Last Updated: 2026-04-12*
 *Next Review: After each session completion*
