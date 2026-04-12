@@ -25,7 +25,7 @@
 
 ### Project Structure
 ```
-agent-academy/
+agent-arch/
 ├── README.md                           # Project explanation
 ├── ROADMAP.md                          # This file
 ├── package.json

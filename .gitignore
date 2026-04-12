@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.local
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Build output
+dist/
+frontend/dist/
+backend/dist/
+
+# Database directory (created at runtime by init.ts after fixing Bug #3)
+# This directory does NOT exist on fresh clone — that's intentional.
+# Once you fix init.ts, it will be created automatically.
+data/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
