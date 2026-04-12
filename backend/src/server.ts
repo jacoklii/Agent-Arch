@@ -5,14 +5,28 @@
  * The frontend polls /api/status to know whether to show the locked screen.
  *
  * Endpoints:
- *   GET  /api/status      → { locked, errors }
- *   POST /api/retry-init  → re-runs initPlatform(), returns new status
+ *   GET  /api/status           → { locked, errors }
+ *   POST /api/retry-init       → re-runs initPlatform(), returns new status
+ *
+ *   POST /api/agent/start      → start the agent runtime
+ *   POST /api/agent/stop       → stop the agent runtime
+ *   GET  /api/agent/status     → agent state + WS client count
+ *   POST /api/agent/send       → send a message to the agent (async, WS response)
+ *   GET  /api/agent/logs       → recent agent log entries from SQLite
+ *   POST /api/agent/memory/clear → clear agent memory
+ *
+ *   WebSocket: ws://localhost:3001/ws  → real-time agent events for the dashboard
  */
 
+import * as http from 'http';
+import * as fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
+import Database from 'better-sqlite3';
+import * as path from 'path';
 import { initPlatform, InitResult } from './setup/init';
+import { attachWebSocket, createExecutor } from './agent-runtime/executor';
 import {
   welcomeHandler,
   chatHandler,
@@ -157,9 +171,43 @@ async function start() {
     console.log('  Then click "Retry Initialization" in the browser\n');
   }
 
-  app.listen(PORT, () => {
+  // ── Agent runtime setup (Session 3) ─────────────────────────
+  // Open the shared SQLite database.
+  // The same database used by init.ts for platform state also stores agent logs.
+  const dbPath = path.resolve(__dirname, '../../../data/agent-arch.db');
+
+  // Ensure the data directory exists before opening the database.
+  // init.ts may have failed to create it (that's intentional — it's a learning
+  // exercise), so we create it here as a safety net.
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+
+  const db = new Database(dbPath);
+
+  // Create an HTTP server from the Express app.
+  // We need an http.Server instance to attach the WebSocket server.
+  // Both HTTP and WebSocket traffic share port 3001.
+  const server = http.createServer(app);
+
+  // Attach the WebSocket server at the /ws path.
+  const wss = attachWebSocket(server);
+
+  // Wire up the agent executor and register its route handlers.
+  const executor = createExecutor(wss, db);
+
+  app.post('/api/agent/start',        executor.handleStart);
+  app.post('/api/agent/stop',         executor.handleStop);
+  app.get('/api/agent/status',        executor.handleStatus);
+  app.post('/api/agent/send',         executor.handleSend);
+  app.get('/api/agent/logs',          executor.handleLogs);
+  app.post('/api/agent/memory/clear', executor.handleMemoryClear);
+
+  server.listen(PORT, () => {
     console.log(`[server] Backend running on http://localhost:${PORT}`);
-    console.log(`[server] Status endpoint: http://localhost:${PORT}/api/status\n`);
+    console.log(`[server] Status endpoint: http://localhost:${PORT}/api/status`);
+    console.log(`[server] Agent WebSocket: ws://localhost:${PORT}/ws\n`);
   });
 }
 

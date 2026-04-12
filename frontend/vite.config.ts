@@ -13,6 +13,12 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      // Proxy WebSocket connections for the agent dashboard
+      // new WebSocket('ws://localhost:3000/ws') → ws://localhost:3001/ws
+      '/ws': {
+        target: 'ws://localhost:3001',
+        ws: true,
+      },
     },
   },
 });

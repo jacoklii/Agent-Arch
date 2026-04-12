@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import LockedScreen from './components/LockedScreen';
 import AssistantChat from './components/AssistantChat';
 import ConceptViewer from './components/ConceptViewer';
+import AgentViewer from './components/AgentViewer';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -29,6 +30,7 @@ export default function App() {
   const [retrying, setRetrying] = useState(false);
   const [backendDown, setBackendDown] = useState(false);
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'assistant' | 'agent'>('assistant');
 
   // Fetch the current platform status from the backend
   async function fetchStatus() {
@@ -108,24 +110,52 @@ export default function App() {
     );
   }
 
-  // ── Platform is unlocked ✅ — show the teaching assistant ──
+  // ── Platform is unlocked ✅ — show the teaching assistant + agent dashboard ──
   return (
     <div style={styles.appShell}>
-      <div style={{
-        flex: activeConcept ? '0 0 62%' : '1',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        minWidth: 0,
-      }}>
-        <AssistantChat onConceptOpen={setActiveConcept} />
+      {/* Tab bar — switch between Teaching Assistant and Agent Dashboard */}
+      <div style={styles.tabBar}>
+        <button
+          style={activeTab === 'assistant' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('assistant')}
+        >
+          Teaching Assistant
+        </button>
+        <button
+          style={activeTab === 'agent' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('agent')}
+        >
+          Agent Dashboard
+        </button>
       </div>
-      {activeConcept && (
-        <div style={styles.conceptPanel}>
-          <ConceptViewer
-            slug={activeConcept}
-            onClose={() => setActiveConcept(null)}
-          />
+
+      {/* Teaching Assistant view */}
+      {activeTab === 'assistant' && (
+        <div style={styles.tabContent}>
+          <div style={{
+            flex: activeConcept ? '0 0 62%' : '1',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            minWidth: 0,
+          }}>
+            <AssistantChat onConceptOpen={setActiveConcept} />
+          </div>
+          {activeConcept && (
+            <div style={styles.conceptPanel}>
+              <ConceptViewer
+                slug={activeConcept}
+                onClose={() => setActiveConcept(null)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Agent Dashboard view */}
+      {activeTab === 'agent' && (
+        <div style={styles.tabContent}>
+          <AgentViewer />
         </div>
       )}
     </div>
@@ -140,8 +170,42 @@ const styles: Record<string, React.CSSProperties> = {
   appShell: {
     height: '100vh',
     display: 'flex',
-    flexDirection: 'row',
+    flexDirection: 'column',
     background: '#0a0a0a',
+    overflow: 'hidden',
+  },
+  tabBar: {
+    display: 'flex',
+    borderBottom: '1px solid #1f2937',
+    background: '#050d1a',
+    flexShrink: 0,
+  },
+  tab: {
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    color: '#475569',
+    cursor: 'pointer',
+    fontFamily: '"Courier New", Courier, monospace',
+    fontSize: '0.8rem',
+    letterSpacing: '0.05em',
+    padding: '0.6rem 1.25rem',
+  },
+  tabActive: {
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid #7dd3fc',
+    color: '#7dd3fc',
+    cursor: 'pointer',
+    fontFamily: '"Courier New", Courier, monospace',
+    fontSize: '0.8rem',
+    letterSpacing: '0.05em',
+    padding: '0.6rem 1.25rem',
+  },
+  tabContent: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'row',
     overflow: 'hidden',
   },
   conceptPanel: {

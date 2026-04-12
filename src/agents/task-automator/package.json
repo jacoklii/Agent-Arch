@@ -1,0 +1,16 @@
+{
+  "name": "task-automator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agent Arch — Task Automator agent template. Implement the TODOs to make the tests pass.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.2",
+    "vitest": "^1.6.0"
+  }
+}
