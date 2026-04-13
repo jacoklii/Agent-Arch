@@ -3,6 +3,7 @@ import LockedScreen from './components/LockedScreen';
 import AssistantChat from './components/AssistantChat';
 import ConceptViewer from './components/ConceptViewer';
 import AgentViewer from './components/AgentViewer';
+import ProgressTracker from './components/ProgressTracker';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -55,6 +56,19 @@ export default function App() {
     const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Called when a concept panel loads a lesson — tracks viewing for progress
+  async function handleConceptView(slug: string) {
+    try {
+      await fetch('/api/progress/view-concept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      });
+    } catch {
+      // Non-critical — progress tracking failure shouldn't break the UI
+    }
+  }
 
   // Called when user clicks "Retry Initialization"
   async function handleRetry() {
@@ -132,8 +146,14 @@ export default function App() {
       {/* Teaching Assistant view */}
       {activeTab === 'assistant' && (
         <div style={styles.tabContent}>
+          {/* LEFT: Progress sidebar */}
+          <div style={styles.progressPanel}>
+            <ProgressTracker />
+          </div>
+
+          {/* MIDDLE: Chat */}
           <div style={{
-            flex: activeConcept ? '0 0 62%' : '1',
+            flex: activeConcept ? '0 0 45%' : '1',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -141,11 +161,14 @@ export default function App() {
           }}>
             <AssistantChat onConceptOpen={setActiveConcept} />
           </div>
+
+          {/* RIGHT: Concept panel (shown when a lesson is open) */}
           {activeConcept && (
             <div style={styles.conceptPanel}>
               <ConceptViewer
                 slug={activeConcept}
                 onClose={() => setActiveConcept(null)}
+                onConceptView={handleConceptView}
               />
             </div>
           )}
@@ -208,8 +231,15 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'row',
     overflow: 'hidden',
   },
+  progressPanel: {
+    width: '220px',
+    flexShrink: 0,
+    borderRight: '1px solid #1f2937',
+    overflowY: 'auto',
+    background: '#050d1a',
+  },
   conceptPanel: {
-    flex: '0 0 38%',
+    flex: '0 0 35%',
     borderLeft: '1px solid #1f2937',
     overflowY: 'auto',
   },

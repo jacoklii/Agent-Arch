@@ -33,7 +33,11 @@ import {
   resetChatHandler,
   curriculumListHandler,
   curriculumHandler,
+  configureReviewer,
 } from './assistant-service/chat-handler';
+import { createProgressTracker } from './reviewer/progress-tracker';
+import { runTests } from './reviewer/test-runner';
+import { analyzeCode } from './reviewer/code-analyzer';
 
 dotenv.config();
 
@@ -64,6 +68,10 @@ let currentInitResult: InitResult = {
     hint: 'The server is starting up — wait a moment and retry.',
   }],
 };
+
+// Lazily set after tracker is created in start() — lets retry handler
+// mark fix-init complete without needing to pass tracker through closure chains.
+let _markFixInit: (() => void) | null = null;
 
 // ────────────────────────────────────────────────────────────
 // Routes
@@ -101,6 +109,7 @@ app.post('/api/retry-init', async (_req, res) => {
 
     if (currentInitResult.success) {
       console.log('[init] ✅ Initialization succeeded — platform unlocked!');
+      _markFixInit?.();
     } else {
       console.log(`[init] ❌ ${currentInitResult.errors.length} error(s) found:`);
       currentInitResult.errors.forEach(e => {
@@ -203,6 +212,75 @@ async function start() {
   app.post('/api/agent/send',         executor.handleSend);
   app.get('/api/agent/logs',          executor.handleLogs);
   app.post('/api/agent/memory/clear', executor.handleMemoryClear);
+
+  // ── Progress tracker + Code reviewer (Session 5) ─────────────────────────
+  // Single progress tracker instance shared between routes and the assistant.
+  const tracker = createProgressTracker(db);
+
+  // Give the chat handler access to reviewer functions so Claude can call them
+  // as tools mid-conversation.
+  configureReviewer(tracker);
+
+  // Wire up the fix-init auto-complete for the retry handler
+  _markFixInit = () => tracker.markTaskComplete('fix-init');
+
+  // If the platform is already unlocked at startup, mark fix-init immediately
+  if (currentInitResult.success) {
+    tracker.markTaskComplete('fix-init');
+  }
+
+  // Progress routes — track curriculum completion state
+  app.get('/api/progress', (_req, res) => {
+    res.json(tracker.getProgress());
+  });
+
+  app.post('/api/progress/view-concept', (req, res) => {
+    const { slug } = req.body as { slug?: string };
+    if (!slug || typeof slug !== 'string') {
+      res.status(400).json({ error: 'slug is required' });
+      return;
+    }
+    tracker.markConceptViewed(slug);
+    res.json({ ok: true, progress: tracker.getProgress() });
+  });
+
+  app.post('/api/progress/complete', (req, res) => {
+    const { taskId } = req.body as { taskId?: string };
+    if (!taskId || typeof taskId !== 'string') {
+      res.status(400).json({ error: 'taskId is required' });
+      return;
+    }
+    tracker.markTaskComplete(taskId);
+    res.json({ ok: true, progress: tracker.getProgress() });
+  });
+
+  app.post('/api/progress/current-task', (req, res) => {
+    const { task } = req.body as { task?: string | null };
+    tracker.updateCurrentTask(task ?? null);
+    res.json({ ok: true });
+  });
+
+  // Review routes — run tests and analyze code quality
+  app.post('/api/review/run-tests', async (req, res) => {
+    const { file } = req.body as { file?: string };
+    console.log('[review] Running tests' + (file ? ` for ${file}` : ' (all)'));
+    try {
+      const results = await runTests(file);
+      res.json({ ok: true, results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
+
+  app.post('/api/review/analyze', (_req, res) => {
+    console.log('[review] Analyzing code quality');
+    try {
+      const analysis = analyzeCode();
+      res.json({ ok: true, analysis });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
 
   server.listen(PORT, () => {
     console.log(`[server] Backend running on http://localhost:${PORT}`);

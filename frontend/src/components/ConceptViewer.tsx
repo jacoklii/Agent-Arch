@@ -33,6 +33,7 @@ interface ConceptContent extends ConceptMeta {
 interface Props {
   slug: string;
   onClose: () => void;
+  onConceptView?: (slug: string) => void;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ const markdownComponents = {
 // Component
 // ────────────────────────────────────────────────────────────
 
-export default function ConceptViewer({ slug, onClose }: Props) {
+export default function ConceptViewer({ slug, onClose, onConceptView }: Props) {
   const [content, setContent] = useState<ConceptContent | null>(null);
   const [allConcepts, setAllConcepts] = useState<ConceptMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,12 +92,14 @@ export default function ConceptViewer({ slug, onClose }: Props) {
       .then((data: ConceptContent) => {
         setContent(data);
         setLoading(false);
+        // Notify parent so concept viewing is tracked for progress
+        onConceptView?.(currentSlug);
       })
       .catch(() => {
         setContent(null);
         setLoading(false);
       });
-  }, [currentSlug]);
+  }, [currentSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When parent passes a new slug, sync it in
   useEffect(() => {
