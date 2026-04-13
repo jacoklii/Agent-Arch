@@ -111,12 +111,17 @@ export default function LockedScreen({ errors, onRetry, retrying }: Props) {
                   {hintOpen ? '▼ hide hint' : '▶ show hint'}
                 </button>
 
-                {hintOpen && (
+                {/* Smooth expand/collapse via max-height transition */}
+                <div style={{
+                  maxHeight: hintOpen ? '200px' : '0',
+                  overflow: 'hidden',
+                  transition: 'max-height 0.25s ease',
+                }}>
                   <div style={styles.hint}>
                     <span style={styles.hintLabel}>HINT  </span>
                     {error.hint}
                   </div>
-                )}
+                </div>
               </div>
             );
           })}
@@ -143,7 +148,9 @@ export default function LockedScreen({ errors, onRetry, retrying }: Props) {
             onClick={onRetry}
             disabled={retrying}
           >
-            {retrying ? '⟳  Retrying...' : '↺  Retry Initialization'}
+            {retrying ? (
+              <><span className="spinner">⟳</span>  Retrying...</>
+            ) : '↺  Retry Initialization'}
           </button>
         </div>
 

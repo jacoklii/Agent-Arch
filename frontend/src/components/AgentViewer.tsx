@@ -68,70 +68,88 @@ export default function AgentViewer() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const mountedRef = useRef(true);
 
-  // ── WebSocket connection ─────────────────────────────────────
+  // ── WebSocket connection with auto-reconnect ─────────────────
   useEffect(() => {
-    // Connect to the agent runtime WebSocket.
-    // Vite proxies ws://localhost:3000/ws → ws://localhost:3001/ws
-    const ws = new WebSocket(`ws://${window.location.host}/ws`);
-    wsRef.current = ws;
+    mountedRef.current = true;
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      console.log('[AgentViewer] WebSocket connected');
-    };
+    function connectWs() {
+      if (!mountedRef.current) return;
 
-    ws.onclose = () => {
-      setWsConnected(false);
-      console.log('[AgentViewer] WebSocket disconnected');
-    };
+      const ws = new WebSocket(`ws://${window.location.host}/ws`);
+      wsRef.current = ws;
 
-    ws.onerror = (err) => {
-      console.error('[AgentViewer] WebSocket error:', err);
-    };
+      ws.onopen = () => {
+        setWsConnected(true);
+        reconnectAttemptsRef.current = 0;
+        console.log('[AgentViewer] WebSocket connected');
+      };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data as string) as AgentEvent;
+      ws.onclose = () => {
+        setWsConnected(false);
+        console.log('[AgentViewer] WebSocket disconnected');
+        if (!mountedRef.current) return;
+        // Exponential backoff: 1s, 2s, 4s, 8s, max 10s
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+        reconnectAttemptsRef.current++;
+        console.log(`[AgentViewer] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})`);
+        reconnectTimeoutRef.current = setTimeout(connectWs, delay);
+      };
 
-        // Add to event log (keep last 100)
-        setEvents(prev => [data, ...prev].slice(0, 100));
+      ws.onerror = () => {
+        // onclose will handle reconnect — suppress noisy error logs
+      };
 
-        // Update UI state based on event type
-        switch (data.type) {
-          case 'agent:state':
-            if (data.payload.state) {
-              setAgentState(data.payload.state);
-            }
-            break;
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data as string) as AgentEvent;
 
-          case 'agent:response':
-            if (data.payload.output) {
-              setLastResponse(data.payload.output.response);
+          // Add to event log (keep last 100)
+          setEvents(prev => [data, ...prev].slice(0, 100));
+
+          // Update UI state based on event type
+          switch (data.type) {
+            case 'agent:state':
+              if (data.payload.state) {
+                setAgentState(data.payload.state);
+              }
+              break;
+
+            case 'agent:response':
+              if (data.payload.output) {
+                setLastResponse(data.payload.output.response);
+                setError(null);
+              }
+              setSending(false);
+              break;
+
+            case 'agent:error':
+              setError(data.payload.message ?? 'Unknown error');
+              setSending(false);
+              break;
+
+            case 'agent:memory_cleared':
+              setLastResponse(null);
               setError(null);
-            }
-            setSending(false);
-            break;
-
-          case 'agent:error':
-            setError(data.payload.message ?? 'Unknown error');
-            setSending(false);
-            break;
-
-          case 'agent:memory_cleared':
-            setLastResponse(null);
-            setError(null);
-            break;
+              break;
+          }
+        } catch (err) {
+          console.error('[AgentViewer] Failed to parse event:', err);
         }
-      } catch (err) {
-        console.error('[AgentViewer] Failed to parse event:', err);
-      }
-    };
+      };
+    }
+
+    connectWs();
 
     return () => {
-      ws.close();
+      mountedRef.current = false;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      wsRef.current?.close();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll log to top when new events arrive
   useEffect(() => {
@@ -280,7 +298,7 @@ export default function AgentViewer() {
                 onClick={() => void handleSend()}
                 disabled={!isRunning || sending || !testInput.trim()}
               >
-                {sending ? 'Processing...' : 'Send'}
+                {sending ? <><span className="spinner">⟳</span> Processing</> : 'Send'}
               </button>
             </div>
           </div>

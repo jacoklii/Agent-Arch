@@ -66,6 +66,8 @@ export default function ProgressTracker() {
   const [running, setRunning] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [lockedMsg, setLockedMsg] = useState<string | null>(null);
 
   // ── Fetch progress ──────────────────────────────────────
 
@@ -110,6 +112,32 @@ export default function ProgressTracker() {
     } finally {
       setRunning(false);
     }
+  }
+
+  // ── Reset progress ───────────────────────────────────────
+
+  async function handleReset() {
+    if (!confirmReset) {
+      setConfirmReset(true);
+      // Auto-cancel if user doesn't confirm within 3 seconds
+      setTimeout(() => setConfirmReset(false), 3000);
+      return;
+    }
+    setConfirmReset(false);
+    try {
+      await fetch('/api/progress/reset', { method: 'POST' });
+      await fetchProgress();
+      setTestResults(null);
+      setShowResults(false);
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  function handleLockedClick() {
+    setLockedMsg('Complete the previous task first');
+    setTimeout(() => setLockedMsg(null), 2000);
   }
 
   // ── Task state helpers ───────────────────────────────────
@@ -174,7 +202,10 @@ export default function ProgressTracker() {
               style={{
                 ...styles.taskItem,
                 opacity: locked ? 0.4 : 1,
+                cursor: locked ? 'not-allowed' : 'default',
               }}
+              onClick={locked ? handleLockedClick : undefined}
+              title={locked ? 'Complete the previous task first' : undefined}
             >
               <span style={{ ...styles.taskIcon, color: iconColor }}>{icon}</span>
               <span style={{
@@ -192,6 +223,11 @@ export default function ProgressTracker() {
         })}
       </div>
 
+      {/* Locked task tooltip message */}
+      {lockedMsg && (
+        <p style={styles.lockedMsg}>{lockedMsg}</p>
+      )}
+
       {/* Run Tests section */}
       <div style={styles.section}>
         <button
@@ -203,7 +239,16 @@ export default function ProgressTracker() {
           onClick={handleRunTests}
           disabled={running}
         >
-          {running ? '⟳ Running...' : '▶ Run Tests'}
+          {running ? (
+            <><span className="spinner">⟳</span> Running...</>
+          ) : '▶ Run Tests'}
+        </button>
+
+        <button
+          style={confirmReset ? styles.resetBtnConfirm : styles.resetBtn}
+          onClick={handleReset}
+        >
+          {confirmReset ? '⚠ Confirm? (click again)' : '↺ Reset Progress'}
         </button>
 
         {error && (
@@ -362,6 +407,39 @@ const styles: Record<string, React.CSSProperties> = {
     width: '100%',
     textAlign: 'left' as const,
     letterSpacing: '0.03em',
+  },
+  resetBtn: {
+    background: 'transparent',
+    border: '1px solid #1f2937',
+    color: '#374151',
+    fontFamily: mono,
+    fontSize: '0.68rem',
+    padding: '0.3rem 0.6rem',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    width: '100%',
+    textAlign: 'left' as const,
+    letterSpacing: '0.03em',
+  },
+  resetBtnConfirm: {
+    background: '#1c0a0a',
+    border: '1px solid #7f1d1d',
+    color: '#fca5a5',
+    fontFamily: mono,
+    fontSize: '0.68rem',
+    padding: '0.3rem 0.6rem',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    width: '100%',
+    textAlign: 'left' as const,
+    letterSpacing: '0.03em',
+  },
+  lockedMsg: {
+    margin: 0,
+    color: '#f97316',
+    fontSize: '0.68rem',
+    padding: '0.25rem 0',
+    animation: 'fadeInUp 0.15s ease',
   },
   errorMsg: {
     margin: 0,

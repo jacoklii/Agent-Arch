@@ -260,6 +260,13 @@ async function start() {
     res.json({ ok: true });
   });
 
+  // Reset all progress — returns the user to the beginning
+  app.post('/api/progress/reset', (_req, res) => {
+    tracker.resetProgress();
+    console.log('[progress] Progress reset to beginning');
+    res.json({ ok: true });
+  });
+
   // Review routes — run tests and analyze code quality
   app.post('/api/review/run-tests', async (req, res) => {
     const { file } = req.body as { file?: string };

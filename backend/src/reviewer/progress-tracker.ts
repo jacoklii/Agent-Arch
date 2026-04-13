@@ -226,12 +226,26 @@ export function createProgressTracker(db: Database.Database) {
     save(row, conceptsViewed, tasksCompleted, quizScores, row.current_task);
   }
 
+  /**
+   * Resets all progress to the initial state — starts the user over.
+   * Clears completed tasks, viewed concepts, quiz scores, and current task.
+   */
+  function resetProgress(): void {
+    updateRow.run(
+      JSON.stringify([]),
+      JSON.stringify([]),
+      JSON.stringify({}),
+      null,
+    );
+  }
+
   return {
     getProgress,
     markConceptViewed,
     markTaskComplete,
     updateCurrentTask,
     recordQuizScore,
+    resetProgress,
     CURRICULUM_TASKS,
   };
 }

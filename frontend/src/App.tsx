@@ -30,6 +30,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [backendDown, setBackendDown] = useState(false);
+  const [backendFailures, setBackendFailures] = useState(0);
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'assistant' | 'agent'>('assistant');
 
@@ -41,9 +42,11 @@ export default function App() {
       const data: StatusResponse = await res.json();
       setStatus(data);
       setBackendDown(false);
+      setBackendFailures(0);
     } catch {
       // Backend isn't up yet or crashed
       setBackendDown(true);
+      setBackendFailures(prev => prev + 1);
     } finally {
       setLoading(false);
     }
@@ -90,24 +93,37 @@ export default function App() {
   if (loading) {
     return (
       <div style={styles.centered}>
-        <p style={styles.muted}>Connecting to backend...</p>
+        <p style={styles.muted}>
+          Connecting to backend
+          <span className="loading-dots">
+            <span /><span /><span />
+          </span>
+        </p>
       </div>
     );
   }
 
   // ── Backend is unreachable ──
   if (backendDown) {
+    const sessionExpired = backendFailures > 8;
     return (
       <div style={styles.centered}>
         <div style={styles.errorBox}>
           <p style={styles.errorTitle}>⚠ Cannot reach backend</p>
           <p style={styles.muted}>
-            Make sure the backend is running:
+            {sessionExpired
+              ? 'The backend stopped responding. Restart the server:'
+              : 'Make sure the backend is running:'}
           </p>
           <code style={styles.code}>npm start</code>
           <p style={styles.muted} className="mt">
             Backend should be at <strong>http://localhost:3001</strong>
           </p>
+          {sessionExpired && (
+            <p style={{ ...styles.muted, marginTop: '0.75rem', color: '#f97316', fontSize: '0.8rem' }}>
+              If you recently restarted the server, this page will auto-reconnect in a few seconds.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -145,15 +161,15 @@ export default function App() {
 
       {/* Teaching Assistant view */}
       {activeTab === 'assistant' && (
-        <div style={styles.tabContent}>
+        <div className="tab-content-enter" style={styles.tabContent}>
           {/* LEFT: Progress sidebar */}
           <div style={styles.progressPanel}>
             <ProgressTracker />
           </div>
 
-          {/* MIDDLE: Chat */}
+          {/* MIDDLE: Chat — always flex: 1 */}
           <div style={{
-            flex: activeConcept ? '0 0 45%' : '1',
+            flex: 1,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -162,22 +178,28 @@ export default function App() {
             <AssistantChat onConceptOpen={setActiveConcept} />
           </div>
 
-          {/* RIGHT: Concept panel (shown when a lesson is open) */}
-          {activeConcept && (
-            <div style={styles.conceptPanel}>
+          {/* RIGHT: Concept panel — always rendered, slides in/out via width transition */}
+          <div style={{
+            width: activeConcept ? '35%' : '0',
+            flexShrink: 0,
+            overflow: 'hidden',
+            borderLeft: activeConcept ? '1px solid #1f2937' : 'none',
+            transition: 'width 0.3s ease',
+          }}>
+            {activeConcept && (
               <ConceptViewer
                 slug={activeConcept}
                 onClose={() => setActiveConcept(null)}
                 onConceptView={handleConceptView}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
       {/* Agent Dashboard view */}
       {activeTab === 'agent' && (
-        <div style={styles.tabContent}>
+        <div className="tab-content-enter" style={styles.tabContent}>
           <AgentViewer />
         </div>
       )}
@@ -237,11 +259,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRight: '1px solid #1f2937',
     overflowY: 'auto',
     background: '#050d1a',
-  },
-  conceptPanel: {
-    flex: '0 0 35%',
-    borderLeft: '1px solid #1f2937',
-    overflowY: 'auto',
   },
   centered: {
     minHeight: '100vh',

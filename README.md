@@ -62,7 +62,7 @@ The platform is locked because `backend/setup/init.ts` has bugs. Your job is to 
 
 ### The file to fix:
 ```
-backend/setup/init.ts
+backend/src/setup/init.ts
 ```
 
 ### What's broken (4 issues):
@@ -97,8 +97,9 @@ If everything is correct, the platform unlocks and you'll meet your AI teaching 
 ```
 agent-arch/
 ├── backend/
-│   └── setup/
-│       └── init.ts        ← START HERE (this is broken)
+│   └── src/
+│       └── setup/
+│           └── init.ts    ← START HERE (this is broken)
 ├── frontend/
 │   └── src/
 │       └── components/
@@ -128,11 +129,122 @@ agent-arch/
 
 ---
 
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `CLAUDE_API_KEY` | Yes | Your Anthropic API key from [console.anthropic.com](https://console.anthropic.com) |
+| `SESSION_SECRET` | Yes | Random 32+ char string used to sign auth sessions |
+| `PORT` | No | Backend port (default: 3001) |
+| `NODE_ENV` | No | `development` or `production` |
+
+Generate a secure `SESSION_SECRET`:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+---
+
+## Architecture
+
+```
+Browser (localhost:3000)
+       │
+       │  HTTP / SSE / WebSocket
+       ▼
+  Express Backend (localhost:3001)
+       │
+       ├─ /api/status        ← platform lock check
+       ├─ /api/chat          ← teaching assistant (SSE stream)
+       ├─ /api/curriculum    ← lesson content
+       ├─ /api/agent/*       ← agent runtime controls
+       ├─ /api/progress/*    ← curriculum progress
+       ├─ /api/review/*      ← test runner & code analysis
+       └─ /ws (WebSocket)    ← real-time agent events
+             │
+        SQLite DB (data/agent-arch.db)
+        Claude API (claude-sonnet-4-5)
+```
+
+---
+
+## Deployment
+
+To run your agent in the cloud (so it can receive webhooks and run 24/7):
+
+### Railway (recommended)
+
+1. Push your repo to GitHub
+2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
+3. Set environment variables in Railway's dashboard (same as `.env`)
+4. Railway auto-detects Node.js and runs `npm start`
+5. Your agent URL will be something like `https://agent-arch-production.up.railway.app`
+
+### Render
+
+1. Push to GitHub
+2. Go to [render.com](https://render.com) → New Web Service
+3. Connect your repo, set build command: `npm run install:all && npm run build`
+4. Set start command: `npm start`
+5. Add environment variables in Render dashboard
+
+### Fly.io
+
+```bash
+npm install -g flyctl
+fly launch
+fly secrets set CLAUDE_API_KEY=your-key SESSION_SECRET=your-secret
+fly deploy
+```
+
+---
+
+## Troubleshooting
+
+### "Cannot reach backend" on the frontend
+
+The Express server isn't running. In a new terminal:
+```bash
+npm start
+```
+Check that port 3001 is free: `lsof -i :3001`
+
+### Platform stays locked after fixing init.ts
+
+1. Save your file changes
+2. Make sure your `.env` exists with all required variables
+3. Click **Retry Initialization** (no server restart needed)
+4. Check the terminal for error messages — the server logs exactly what's failing
+
+### "CLAUDE_API_KEY is not configured" error
+
+1. Copy `.env.example` to `.env`: `cp .env.example .env`
+2. Add your API key from [console.anthropic.com](https://console.anthropic.com)
+3. Restart the backend: `npm start`
+
+### WebSocket disconnected in Agent Dashboard
+
+This is expected if the backend restarts. The dashboard auto-reconnects within a few seconds. If it doesn't reconnect, refresh the page.
+
+### Tests fail with "cannot find module"
+
+Run `npm run install:all` to ensure all dependencies are installed in both frontend and backend directories.
+
+### SQLite database errors
+
+Delete `data/agent-arch.db` and restart — the server recreates it automatically:
+```bash
+rm -f data/agent-arch.db && npm start
+```
+
+---
+
 ## Stuck?
 
 1. Read the error messages on the locked screen carefully
-2. Open `backend/setup/init.ts` and read every `// BUG:` and `// TODO:` comment
+2. Open `backend/src/setup/init.ts` and read every `// BUG:` and `// TODO:` comment
 3. Check that your `.env` file exists and has all required variables
 4. Still stuck? The hints on the locked screen will guide you
+5. Use the **I'm Stuck** button in the teaching assistant chat for targeted hints
 
 Good luck. You've got this.

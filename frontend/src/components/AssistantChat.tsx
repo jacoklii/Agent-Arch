@@ -301,6 +301,29 @@ export default function AssistantChat({ onConceptOpen }: Props) {
     await fetchWelcome();
   }, [streaming, fetchWelcome]);
 
+  // ── Export conversation as markdown ──
+  function handleExport() {
+    if (messages.length === 0) return;
+    const lines = messages.map(m =>
+      `### ${m.role === 'user' ? 'You' : 'Assistant'}\n\n${m.content}`
+    ).join('\n\n---\n\n');
+    const text = `# Agent Arch — Conversation Export\n_${new Date().toLocaleString()}_\n\n---\n\n${lines}`;
+    const blob = new Blob([text], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agent-arch-${new Date().toISOString().split('T')[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── "I'm Stuck" — sends a targeted help request ──
+  const handleStuck = useCallback(() => {
+    sendMessage("I'm stuck and need help. Can you give me a targeted hint for what I should do next? Don't give me the full solution — just a nudge in the right direction.");
+  }, [sendMessage]);
+
   // ── Keyboard handler ──
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && e.ctrlKey) {
@@ -324,14 +347,24 @@ export default function AssistantChat({ onConceptOpen }: Props) {
           <span style={styles.headerTitle}>AGENT ARCH</span>
           <span style={styles.headerSub}> — Teaching Assistant</span>
         </div>
-        <button
-          style={streaming ? styles.resetBtnDisabled : styles.resetBtn}
-          onClick={handleReset}
-          disabled={streaming}
-          title="Start a new conversation"
-        >
-          New conversation
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            style={messages.length === 0 ? styles.resetBtnDisabled : styles.resetBtn}
+            onClick={handleExport}
+            disabled={messages.length === 0}
+            title="Export conversation as Markdown"
+          >
+            Export
+          </button>
+          <button
+            style={streaming ? styles.resetBtnDisabled : styles.resetBtn}
+            onClick={handleReset}
+            disabled={streaming}
+            title="Start a new conversation"
+          >
+            New
+          </button>
+        </div>
       </div>
 
       {/* Message list */}
@@ -369,37 +402,57 @@ export default function AssistantChat({ onConceptOpen }: Props) {
 
         {/* Streaming cursor */}
         {streaming && messages[messages.length - 1]?.isStreaming && (
-          <span style={styles.cursor}>▋</span>
+          <span className="cursor-blink" style={styles.cursor}>▋</span>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Error banner */}
+      {/* Error banner with retry */}
       {error && (
         <div style={styles.errorBanner}>
-          ⚠ {error}
+          <span>⚠ {error}</span>
+          <button
+            style={styles.errorRetryBtn}
+            onClick={() => { setError(null); void fetchWelcome(); }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
       {/* Input area */}
       <div style={styles.inputArea}>
-        <textarea
-          ref={textareaRef}
-          style={streaming ? styles.textareaDisabled : styles.textarea}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask a question... (Ctrl+Enter to send)"
-          disabled={streaming}
-          rows={3}
-        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <textarea
+            ref={textareaRef}
+            style={streaming ? styles.textareaDisabled : styles.textarea}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask a question... (Ctrl+Enter to send)"
+            disabled={streaming}
+            rows={3}
+          />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              style={streaming ? styles.stuckBtnDisabled : styles.stuckBtn}
+              onClick={handleStuck}
+              disabled={streaming}
+              title="Ask for a targeted hint on your current task"
+            >
+              I'm Stuck
+            </button>
+          </div>
+        </div>
         <button
           style={streaming || !input.trim() ? styles.sendBtnDisabled : styles.sendBtn}
           onClick={() => sendMessage(input)}
           disabled={streaming || !input.trim()}
         >
-          Send
+          {streaming ? (
+            <><span className="spinner">⟳</span></>
+          ) : 'Send'}
         </button>
       </div>
     </div>
@@ -521,12 +574,14 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: '0.25rem',
+    animation: 'fadeInUp 0.2s ease',
   },
   userBubbleWrapper: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
     gap: '0.25rem',
+    animation: 'fadeInUp 0.2s ease',
   },
   roleTagAssistant: {
     fontSize: '0.65rem',
@@ -580,7 +635,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cursor: {
     color: '#7dd3fc',
-    animation: 'none',
     fontSize: '1rem',
     display: 'block',
     height: '1.2rem',
@@ -632,6 +686,41 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0.5rem 1.25rem',
     fontSize: '0.8rem',
     flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.75rem',
+  },
+  errorRetryBtn: {
+    background: 'none',
+    border: '1px solid #7f1d1d',
+    color: '#fca5a5',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    padding: '0.2rem 0.6rem',
+    fontSize: '0.72rem',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+  },
+  stuckBtn: {
+    background: 'none',
+    border: '1px solid #374151',
+    color: '#f59e0b',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    padding: '0.2rem 0.7rem',
+    fontSize: '0.72rem',
+    fontFamily: 'inherit',
+  },
+  stuckBtnDisabled: {
+    background: 'none',
+    border: '1px solid #1f2937',
+    color: '#374151',
+    cursor: 'not-allowed',
+    borderRadius: '4px',
+    padding: '0.2rem 0.7rem',
+    fontSize: '0.72rem',
+    fontFamily: 'inherit',
   },
   inputArea: {
     display: 'flex',
