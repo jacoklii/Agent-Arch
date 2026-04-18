@@ -126,6 +126,7 @@ export default function ProgressTracker() {
     setConfirmReset(false);
     try {
       await fetch('/api/progress/reset', { method: 'POST' });
+      await fetch('/api/progress/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: 'fix-init' }) });
       await fetchProgress();
       setTestResults(null);
       setShowResults(false);

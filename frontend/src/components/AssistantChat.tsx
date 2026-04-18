@@ -5,15 +5,19 @@
  * via SSE (using fetch + ReadableStream), renders markdown with syntax
  * highlighting, and detects [CONCEPT:slug] markers to open the lesson panel.
  *
+ * Supports up to 4 chat tabs, each with an independent message history.
+ * The backend session is shared — creating a new tab resets it server-side.
+ *
  * User flow:
  *   1. On mount → GET /api/chat/welcome → streams opening message
  *   2. After first message → show agent type selector buttons
  *   3. User chats → POST /api/chat → streams response
  *   4. [CONCEPT:slug] in response → show "Open lesson" button
- *   5. "New conversation" → POST /api/chat/reset → re-fetch welcome
+ *   5. + button → new tab (max 4), resets backend session
+ *   6. × button → closes tab (disabled when only one tab remains)
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -25,9 +29,19 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;           // display content — [CONCEPT:*] markers stripped
-  conceptRefs: string[];     // concept slugs extracted from raw response
+  content: string;
+  conceptRefs: string[];
   isStreaming?: boolean;
+}
+
+interface ChatTab {
+  id: string;
+  label: string;
+  messages: ChatMessage[];
+  agentTypeChosen: boolean;
+  streaming: boolean;
+  error: string | null;
+  input: string;
 }
 
 interface Props {
@@ -38,12 +52,11 @@ interface Props {
 // Helpers
 // ────────────────────────────────────────────────────────────
 
-// Extract [CONCEPT:slug] markers and return {clean text, slugs}
 function extractConcepts(text: string): { clean: string; slugs: string[] } {
   const slugs: string[] = [];
   const clean = text.replace(/\[CONCEPT:([^\]]+)\]/g, (_match, slug: string) => {
     slugs.push(slug.trim());
-    return ''; // remove the marker from display text
+    return '';
   });
   return { clean: clean.trim(), slugs };
 }
@@ -91,9 +104,6 @@ const markdownComponents = {
 
 // ────────────────────────────────────────────────────────────
 // SSE reader
-// Reads a fetch response body as SSE. Calls onDelta for each text chunk,
-// onDone when the stream completes, onError on failure.
-// Returns the accumulated full text.
 // ────────────────────────────────────────────────────────────
 
 async function readSSEStream(
@@ -103,10 +113,7 @@ async function readSSEStream(
   onError: (message: string) => void,
 ): Promise<void> {
   const reader = response.body?.getReader();
-  if (!reader) {
-    onError('No response body');
-    return;
-  }
+  if (!reader) { onError('No response body'); return; }
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -115,34 +122,18 @@ async function readSSEStream(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
-
-      // Split on SSE event boundaries — each event ends with \n\n
       const events = buffer.split('\n\n');
-      // Last element may be incomplete — keep it in the buffer
       buffer = events.pop() ?? '';
-
       for (const event of events) {
         for (const line of event.split('\n')) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const payload = JSON.parse(line.slice(6)) as {
-              type: string;
-              delta?: string;
-              message?: string;
-            };
-
-            if (payload.type === 'text' && payload.delta) {
-              onDelta(payload.delta);
-            } else if (payload.type === 'done') {
-              onDone();
-            } else if (payload.type === 'error') {
-              onError(payload.message ?? 'Unknown error');
-            }
-          } catch {
-            // Malformed JSON line — skip
-          }
+            const payload = JSON.parse(line.slice(6)) as { type: string; delta?: string; message?: string };
+            if (payload.type === 'text' && payload.delta) onDelta(payload.delta);
+            else if (payload.type === 'done') onDone();
+            else if (payload.type === 'error') onError(payload.message ?? 'Unknown error');
+          } catch { /* malformed — skip */ }
         }
       }
     }
@@ -156,114 +147,144 @@ async function readSSEStream(
 // ────────────────────────────────────────────────────────────
 
 export default function AssistantChat({ onConceptOpen }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [agentTypeChosen, setAgentTypeChosen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [tabs, setTabs] = useState<ChatTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string>('');
+  const tabCounterRef = useRef(0);
+  const initializedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom whenever messages change
+  const activeTab = tabs.find(t => t.id === activeTabId) ?? null;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [activeTab?.messages]);
 
-  // ── Stream a response and update a specific message in state ──
-  const streamIntoMessage = useCallback(
-    async (response: Response, messageId: string) => {
-      let accumulated = '';
+  // ── Tab state updater ──
+  function updateTab(tabId: string, patch: Partial<ChatTab>) {
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, ...patch } : t));
+  }
 
-      await readSSEStream(
-        response,
-        (delta) => {
-          accumulated += delta;
-          const { clean } = extractConcepts(accumulated);
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === messageId ? { ...m, content: clean, isStreaming: true } : m
-            )
-          );
-        },
-        () => {
-          // Stream done — finalize, extract concepts
-          const { clean, slugs } = extractConcepts(accumulated);
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === messageId
-                ? { ...m, content: clean, conceptRefs: slugs, isStreaming: false }
-                : m
-            )
-          );
-          setStreaming(false);
-          setError(null);
-        },
-        (errMsg) => {
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === messageId
-                ? { ...m, content: `*(Error: ${errMsg})*`, isStreaming: false }
-                : m
-            )
-          );
-          setStreaming(false);
-          setError(errMsg);
-        },
-      );
-    },
-    []
-  );
+  // ── Stream a response into a specific message in a specific tab ──
+  async function streamIntoMessage(response: Response, tabId: string, messageId: string) {
+    let accumulated = '';
+    await readSSEStream(
+      response,
+      (delta) => {
+        accumulated += delta;
+        const { clean } = extractConcepts(accumulated);
+        setTabs(prev => prev.map(t =>
+          t.id === tabId
+            ? { ...t, messages: t.messages.map(m => m.id === messageId ? { ...m, content: clean, isStreaming: true } : m) }
+            : t
+        ));
+      },
+      () => {
+        const { clean, slugs } = extractConcepts(accumulated);
+        setTabs(prev => prev.map(t =>
+          t.id === tabId
+            ? { ...t, streaming: false, error: null, messages: t.messages.map(m => m.id === messageId ? { ...m, content: clean, conceptRefs: slugs, isStreaming: false } : m) }
+            : t
+        ));
+      },
+      (errMsg) => {
+        setTabs(prev => prev.map(t =>
+          t.id === tabId
+            ? { ...t, streaming: false, error: errMsg, messages: t.messages.map(m => m.id === messageId ? { ...m, content: `*(Error: ${errMsg})*`, isStreaming: false } : m) }
+            : t
+        ));
+      },
+    );
+  }
 
-  // ── Fetch welcome message on mount ──
-  const fetchWelcome = useCallback(async () => {
+  // ── Fetch welcome message for a tab ──
+  async function fetchWelcome(tabId: string) {
     const msgId = randomId();
-    setMessages([{
-      id: msgId,
-      role: 'assistant',
-      content: '',
-      conceptRefs: [],
-      isStreaming: true,
-    }]);
-    setStreaming(true);
-
+    setTabs(prev => prev.map(t =>
+      t.id === tabId
+        ? { ...t, streaming: true, messages: [{ id: msgId, role: 'assistant', content: '', conceptRefs: [], isStreaming: true }] }
+        : t
+    ));
     try {
       const res = await fetch('/api/chat/welcome');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await streamIntoMessage(res, msgId);
+      await streamIntoMessage(res, tabId, msgId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setMessages([{
-        id: msgId,
-        role: 'assistant',
-        content: `*(Could not connect to assistant: ${msg})*`,
-        conceptRefs: [],
-        isStreaming: false,
-      }]);
-      setStreaming(false);
+      setTabs(prev => prev.map(t =>
+        t.id === tabId
+          ? { ...t, streaming: false, messages: [{ id: msgId, role: 'assistant', content: `*(Could not connect to assistant: ${msg})*`, conceptRefs: [], isStreaming: false }] }
+          : t
+      ));
     }
-  }, [streamIntoMessage]);
+  }
 
+  // ── Create a new tab (max 4) ──
+  async function createTab() {
+    if (tabs.length >= 4) return;
+    tabCounterRef.current += 1;
+    const tabId = randomId();
+    const newTab: ChatTab = {
+      id: tabId,
+      label: `Chat ${tabCounterRef.current}`,
+      messages: [],
+      agentTypeChosen: false,
+      streaming: false,
+      error: null,
+      input: '',
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(tabId);
+    await fetch('/api/chat/reset', { method: 'POST' });
+    await fetchWelcome(tabId);
+  }
+
+  // ── Delete a tab (blocked when only one remains) ──
+  function deleteTab(tabId: string) {
+    if (tabs.length <= 1) return;
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.id === tabId);
+      const next = prev.filter(t => t.id !== tabId);
+      if (activeTabId === tabId && next.length > 0) {
+        setActiveTabId(next[Math.min(idx, next.length - 1)].id);
+      }
+      return next;
+    });
+  }
+
+  // ── Initial mount: create first tab ──
   useEffect(() => {
-    fetchWelcome();
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    tabCounterRef.current = 1;
+    const tabId = randomId();
+    setTabs([{ id: tabId, label: 'Chat 1', messages: [], agentTypeChosen: false, streaming: false, error: null, input: '' }]);
+    setActiveTabId(tabId);
+    void fetchWelcome(tabId);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Send a user message ──
-  const sendMessage = useCallback(async (text: string) => {
+  // ── Send a user message on the active tab ──
+  async function sendMessage(text: string) {
+    if (!activeTab || !text.trim() || activeTab.streaming) return;
+    const tabId = activeTabId;
     const trimmed = text.trim();
-    if (!trimmed || streaming) return;
-
-    // Add user message
     const userMsgId = randomId();
     const assistantMsgId = randomId();
 
-    setMessages(prev => [
-      ...prev,
-      { id: userMsgId, role: 'user', content: trimmed, conceptRefs: [] },
-      { id: assistantMsgId, role: 'assistant', content: '', conceptRefs: [], isStreaming: true },
-    ]);
-    setInput('');
-    setStreaming(true);
+    setTabs(prev => prev.map(t =>
+      t.id === tabId
+        ? {
+            ...t,
+            streaming: true,
+            input: '',
+            messages: [
+              ...t.messages,
+              { id: userMsgId, role: 'user', content: trimmed, conceptRefs: [] },
+              { id: assistantMsgId, role: 'assistant', content: '', conceptRefs: [], isStreaming: true },
+            ],
+          }
+        : t
+    ));
 
     try {
       const res = await fetch('/api/chat', {
@@ -272,39 +293,35 @@ export default function AssistantChat({ onConceptOpen }: Props) {
         body: JSON.stringify({ message: trimmed }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await streamIntoMessage(res, assistantMsgId);
+      await streamIntoMessage(res, tabId, assistantMsgId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === assistantMsgId
-            ? { ...m, content: `*(Connection error: ${msg})*`, isStreaming: false }
-            : m
-        )
-      );
-      setStreaming(false);
+      setTabs(prev => prev.map(t =>
+        t.id === tabId
+          ? { ...t, streaming: false, messages: t.messages.map(m => m.id === assistantMsgId ? { ...m, content: `*(Connection error: ${msg})*`, isStreaming: false } : m) }
+          : t
+      ));
     }
-  }, [streaming, streamIntoMessage]);
+  }
 
   // ── Agent type selection ──
-  const handleAgentSelect = useCallback((type: string) => {
-    setAgentTypeChosen(true);
-    sendMessage(`I want to build a ${type}.`);
-  }, [sendMessage]);
+  function handleAgentSelect(type: string) {
+    updateTab(activeTabId, { agentTypeChosen: true });
+    void sendMessage(`I want to build a ${type}.`);
+  }
 
-  // ── Reset conversation ──
-  const handleReset = useCallback(async () => {
-    if (streaming) return;
+  // ── Reset current tab's conversation ──
+  async function handleReset() {
+    if (!activeTab || activeTab.streaming) return;
     await fetch('/api/chat/reset', { method: 'POST' });
-    setAgentTypeChosen(false);
-    setError(null);
-    await fetchWelcome();
-  }, [streaming, fetchWelcome]);
+    updateTab(activeTabId, { agentTypeChosen: false, error: null });
+    await fetchWelcome(activeTabId);
+  }
 
   // ── Export conversation as markdown ──
   function handleExport() {
-    if (messages.length === 0) return;
-    const lines = messages.map(m =>
+    if (!activeTab || activeTab.messages.length === 0) return;
+    const lines = activeTab.messages.map(m =>
       `### ${m.role === 'user' ? 'You' : 'Assistant'}\n\n${m.content}`
     ).join('\n\n---\n\n');
     const text = `# Agent Arch — Conversation Export\n_${new Date().toLocaleString()}_\n\n---\n\n${lines}`;
@@ -319,21 +336,22 @@ export default function AssistantChat({ onConceptOpen }: Props) {
     URL.revokeObjectURL(url);
   }
 
-  // ── "I'm Stuck" — sends a targeted help request ──
-  const handleStuck = useCallback(() => {
-    sendMessage("I'm stuck and need help. Can you give me a targeted hint for what I should do next? Don't give me the full solution — just a nudge in the right direction.");
-  }, [sendMessage]);
+  // ── "I'm Stuck" hint request ──
+  function handleStuck() {
+    void sendMessage("I'm stuck and need help. Can you give me a targeted hint for what I should do next? Don't give me the full solution — just a nudge in the right direction.");
+  }
 
-  // ── Keyboard handler ──
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault();
-      sendMessage(input);
+      void sendMessage(activeTab?.input ?? '');
     }
   }
 
-  // Show agent selector after the first assistant message if not yet chosen
-  const showAgentSelector = !agentTypeChosen && messages.length === 1 && !messages[0].isStreaming;
+  const showAgentSelector =
+    !activeTab?.agentTypeChosen &&
+    activeTab?.messages.length === 1 &&
+    !activeTab.messages[0].isStreaming;
 
   // ────────────────────────────────────────────────────────────
   // Render
@@ -341,6 +359,33 @@ export default function AssistantChat({ onConceptOpen }: Props) {
 
   return (
     <div style={styles.root}>
+      {/* Tab bar */}
+      <div style={styles.tabBar}>
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            style={tab.id === activeTabId ? styles.tabActive : styles.tab}
+            onClick={() => setActiveTabId(tab.id)}
+          >
+            <span style={styles.tabLabel}>{tab.label}</span>
+            {tabs.length > 1 && (
+              <button
+                style={styles.tabCloseBtn}
+                onClick={e => { e.stopPropagation(); deleteTab(tab.id); }}
+                title="Close chat"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        {tabs.length < 4 && (
+          <button style={styles.newTabBtn} onClick={() => void createTab()} title="New chat">
+            +
+          </button>
+        )}
+      </div>
+
       {/* Header */}
       <div style={styles.header}>
         <div>
@@ -349,27 +394,27 @@ export default function AssistantChat({ onConceptOpen }: Props) {
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <button
-            style={messages.length === 0 ? styles.resetBtnDisabled : styles.resetBtn}
+            style={!activeTab || activeTab.messages.length === 0 ? styles.resetBtnDisabled : styles.resetBtn}
             onClick={handleExport}
-            disabled={messages.length === 0}
+            disabled={!activeTab || activeTab.messages.length === 0}
             title="Export conversation as Markdown"
           >
             Export
           </button>
           <button
-            style={streaming ? styles.resetBtnDisabled : styles.resetBtn}
+            style={activeTab?.streaming ? styles.resetBtnDisabled : styles.resetBtn}
             onClick={handleReset}
-            disabled={streaming}
-            title="Start a new conversation"
+            disabled={!activeTab || activeTab.streaming}
+            title="Reset this conversation"
           >
-            New
+            Reset
           </button>
         </div>
       </div>
 
       {/* Message list */}
       <div style={styles.messageList}>
-        {messages.map(msg => (
+        {(activeTab?.messages ?? []).map(msg => (
           <MessageBubble
             key={msg.id}
             message={msg}
@@ -377,7 +422,6 @@ export default function AssistantChat({ onConceptOpen }: Props) {
           />
         ))}
 
-        {/* Agent type selector */}
         {showAgentSelector && (
           <div style={styles.agentSelector}>
             <p style={styles.agentSelectorLabel}>Choose your agent type:</p>
@@ -400,21 +444,20 @@ export default function AssistantChat({ onConceptOpen }: Props) {
           </div>
         )}
 
-        {/* Streaming cursor */}
-        {streaming && messages[messages.length - 1]?.isStreaming && (
+        {activeTab?.streaming && activeTab.messages[activeTab.messages.length - 1]?.isStreaming && (
           <span className="cursor-blink" style={styles.cursor}>▋</span>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Error banner with retry */}
-      {error && (
+      {/* Error banner */}
+      {activeTab?.error && (
         <div style={styles.errorBanner}>
-          <span>⚠ {error}</span>
+          <span>⚠ {activeTab.error}</span>
           <button
             style={styles.errorRetryBtn}
-            onClick={() => { setError(null); void fetchWelcome(); }}
+            onClick={() => { updateTab(activeTabId, { error: null }); void fetchWelcome(activeTabId); }}
           >
             Retry
           </button>
@@ -426,19 +469,19 @@ export default function AssistantChat({ onConceptOpen }: Props) {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <textarea
             ref={textareaRef}
-            style={streaming ? styles.textareaDisabled : styles.textarea}
-            value={input}
-            onChange={e => setInput(e.target.value)}
+            style={activeTab?.streaming ? styles.textareaDisabled : styles.textarea}
+            value={activeTab?.input ?? ''}
+            onChange={e => updateTab(activeTabId, { input: e.target.value })}
             onKeyDown={handleKeyDown}
             placeholder="Ask a question... (Ctrl+Enter to send)"
-            disabled={streaming}
+            disabled={!activeTab || activeTab.streaming}
             rows={3}
           />
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
-              style={streaming ? styles.stuckBtnDisabled : styles.stuckBtn}
+              style={activeTab?.streaming ? styles.stuckBtnDisabled : styles.stuckBtn}
               onClick={handleStuck}
-              disabled={streaming}
+              disabled={!activeTab || activeTab.streaming}
               title="Ask for a targeted hint on your current task"
             >
               I'm Stuck
@@ -446,13 +489,11 @@ export default function AssistantChat({ onConceptOpen }: Props) {
           </div>
         </div>
         <button
-          style={streaming || !input.trim() ? styles.sendBtnDisabled : styles.sendBtn}
-          onClick={() => sendMessage(input)}
-          disabled={streaming || !input.trim()}
+          style={activeTab?.streaming || !activeTab?.input.trim() ? styles.sendBtnDisabled : styles.sendBtn}
+          onClick={() => void sendMessage(activeTab?.input ?? '')}
+          disabled={!activeTab || activeTab.streaming || !activeTab.input.trim()}
         >
-          {streaming ? (
-            <><span className="spinner">⟳</span></>
-          ) : 'Send'}
+          {activeTab?.streaming ? <><span className="spinner">⟳</span></> : 'Send'}
         </button>
       </div>
     </div>
@@ -490,7 +531,6 @@ function MessageBubble({
         )}
       </div>
 
-      {/* Concept links — shown below the message once streaming is done */}
       {!message.isStreaming && message.conceptRefs.length > 0 && (
         <div style={styles.conceptLinks}>
           {message.conceptRefs.map(slug => (
@@ -512,6 +552,8 @@ function MessageBubble({
 // Styles
 // ────────────────────────────────────────────────────────────
 
+const mono = "'Courier New', Courier, monospace";
+
 const styles: Record<string, React.CSSProperties> = {
   root: {
     height: '100vh',
@@ -519,9 +561,81 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     background: '#0a0a0a',
     color: '#e2e8f0',
-    fontFamily: "'Courier New', Courier, monospace",
+    fontFamily: mono,
     overflow: 'hidden',
   },
+  // ── Tab bar ──
+  tabBar: {
+    display: 'flex',
+    alignItems: 'stretch',
+    background: '#070d18',
+    borderBottom: '1px solid #1f2937',
+    flexShrink: 0,
+    minHeight: '34px',
+    overflowX: 'auto',
+  },
+  tab: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    padding: '0 0.75rem',
+    cursor: 'pointer',
+    background: '#050a12',
+    color: '#4b5563',
+    fontSize: '0.72rem',
+    fontFamily: mono,
+    border: 'none',
+    borderRight: '1px solid #1f2937',
+    whiteSpace: 'nowrap' as const,
+    minWidth: '80px',
+    userSelect: 'none' as const,
+  },
+  tabActive: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    padding: '0 0.75rem',
+    cursor: 'pointer',
+    background: '#0a0a0a',
+    color: '#e2e8f0',
+    fontSize: '0.72rem',
+    fontFamily: mono,
+    border: 'none',
+    borderRight: '1px solid #1f2937',
+    borderTop: '2px solid #2563eb',
+    whiteSpace: 'nowrap' as const,
+    minWidth: '80px',
+    userSelect: 'none' as const,
+  },
+  tabLabel: {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  tabCloseBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#475569',
+    cursor: 'pointer',
+    padding: '0 0.15rem',
+    fontSize: '1rem',
+    lineHeight: '1',
+    fontFamily: mono,
+    flexShrink: 0,
+    borderRadius: '2px',
+  },
+  newTabBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#475569',
+    cursor: 'pointer',
+    padding: '0 0.85rem',
+    fontSize: '1.1rem',
+    fontFamily: mono,
+    alignSelf: 'center',
+    lineHeight: '1',
+  },
+  // ── Header ──
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -549,7 +663,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.3rem 0.7rem',
     fontSize: '0.75rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
   },
   resetBtnDisabled: {
     background: 'none',
@@ -559,8 +673,9 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.3rem 0.7rem',
     fontSize: '0.75rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
   },
+  // ── Messages ──
   messageList: {
     flex: 1,
     overflowY: 'auto',
@@ -631,7 +746,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.2rem 0.6rem',
     fontSize: '0.75rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
   },
   cursor: {
     color: '#7dd3fc',
@@ -639,6 +754,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'block',
     height: '1.2rem',
   },
+  // ── Agent selector ──
   agentSelector: {
     background: '#111827',
     border: '1px solid #1f2937',
@@ -648,7 +764,6 @@ const styles: Record<string, React.CSSProperties> = {
   agentSelectorLabel: {
     color: '#94a3b8',
     fontSize: '0.8rem',
-    marginBottom: '0.75rem',
     margin: '0 0 0.75rem 0',
   },
   agentBtnRow: {
@@ -667,7 +782,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: '0.2rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
     minWidth: '140px',
   },
   agentBtnLabel: {
@@ -679,6 +794,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#64748b',
     fontSize: '0.72rem',
   },
+  // ── Error ──
   errorBanner: {
     background: '#1c0a0a',
     borderTop: '1px solid #7f1d1d',
@@ -699,9 +815,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.2rem 0.6rem',
     fontSize: '0.72rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
     flexShrink: 0,
   },
+  // ── Input ──
   stuckBtn: {
     background: 'none',
     border: '1px solid #374151',
@@ -710,7 +827,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.2rem 0.7rem',
     fontSize: '0.72rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
   },
   stuckBtnDisabled: {
     background: 'none',
@@ -720,7 +837,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '0.2rem 0.7rem',
     fontSize: '0.72rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
   },
   inputArea: {
     display: 'flex',
@@ -739,7 +856,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     padding: '0.6rem 0.8rem',
     fontSize: '0.85rem',
-    fontFamily: "'Courier New', Courier, monospace",
+    fontFamily: mono,
     resize: 'none',
     outline: 'none',
     lineHeight: 1.5,
@@ -752,7 +869,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     padding: '0.6rem 0.8rem',
     fontSize: '0.85rem',
-    fontFamily: "'Courier New', Courier, monospace",
+    fontFamily: mono,
     resize: 'none',
     outline: 'none',
     lineHeight: 1.5,
@@ -766,7 +883,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     padding: '0.6rem 1.1rem',
     fontSize: '0.85rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
     fontWeight: 'bold',
     flexShrink: 0,
     alignSelf: 'flex-end',
@@ -779,7 +896,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     padding: '0.6rem 1.1rem',
     fontSize: '0.85rem',
-    fontFamily: 'inherit',
+    fontFamily: mono,
     fontWeight: 'bold',
     flexShrink: 0,
     alignSelf: 'flex-end',
