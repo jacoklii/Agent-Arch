@@ -71,6 +71,7 @@ export default function AgentViewer() {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const mountedRef = useRef(true);
+  const lastLoggedStateRef = useRef<AgentState | null>(null);
 
   // ── Sync running state from backend on mount ─────────────────
   useEffect(() => {
@@ -117,6 +118,19 @@ export default function AgentViewer() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data as string) as AgentEvent;
+
+          // Skip duplicate agent:state entries (same state as last logged)
+          if (data.type === 'agent:state' && data.payload.state === lastLoggedStateRef.current) {
+            // Still sync isRunning without polluting the log
+            if ((data.payload as { isRunning?: boolean }).isRunning !== undefined) {
+              setIsRunning((data.payload as { isRunning?: boolean }).isRunning!);
+            }
+            setAgentState(data.payload.state!);
+            return;
+          }
+          if (data.type === 'agent:state' && data.payload.state) {
+            lastLoggedStateRef.current = data.payload.state;
+          }
 
           // Add to event log (keep last 100)
           setEvents(prev => [data, ...prev].slice(0, 100));

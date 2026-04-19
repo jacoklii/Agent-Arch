@@ -235,7 +235,7 @@ export function createExecutor(wss: WebSocketServer, db: Database.Database) {
     }
 
     isRunning = true;
-    setState('idle');
+    // State remains 'idle' — no broadcast needed, avoids redundant log entry
     console.log('[agent-runtime] Agent started');
     res.json({ ok: true, state: currentState });
   }
