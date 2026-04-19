@@ -72,6 +72,17 @@ export default function AgentViewer() {
   const reconnectAttemptsRef = useRef(0);
   const mountedRef = useRef(true);
 
+  // ── Sync running state from backend on mount ─────────────────
+  useEffect(() => {
+    fetch('/api/agent/status')
+      .then(r => r.json())
+      .then((data: { isRunning?: boolean; state?: AgentState }) => {
+        if (data.isRunning !== undefined) setIsRunning(data.isRunning);
+        if (data.state) setAgentState(data.state);
+      })
+      .catch(() => { /* backend not ready yet */ });
+  }, []);
+
   // ── WebSocket connection with auto-reconnect ─────────────────
   useEffect(() => {
     mountedRef.current = true;
@@ -115,6 +126,9 @@ export default function AgentViewer() {
             case 'agent:state':
               if (data.payload.state) {
                 setAgentState(data.payload.state);
+              }
+              if ((data.payload as { isRunning?: boolean }).isRunning !== undefined) {
+                setIsRunning((data.payload as { isRunning?: boolean }).isRunning!);
               }
               break;
 

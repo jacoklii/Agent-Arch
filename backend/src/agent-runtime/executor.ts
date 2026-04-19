@@ -207,6 +207,20 @@ export function createExecutor(wss: WebSocketServer, db: Database.Database) {
     }
   }
 
+  // ── Push current state to newly connected WebSocket clients ──
+  // When the frontend reconnects (e.g. after switching tabs), the WS
+  // client is new and has no state. Sending agent:state immediately
+  // lets the dashboard reflect the real running state without waiting
+  // for the next broadcast event.
+  wss.on('connection', (ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'agent:state',
+        payload: { state: currentState, isRunning, timestamp: new Date().toISOString() },
+      }));
+    }
+  });
+
   // ── Route handlers ─────────────────────────────────────────
 
   /**
