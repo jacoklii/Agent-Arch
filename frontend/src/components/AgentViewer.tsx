@@ -70,7 +70,6 @@ export default function AgentViewer() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
-  const mountedRef = useRef(true);
   const lastLoggedStateRef = useRef<AgentState | null>(null);
 
   // ── Sync running state from backend on mount ─────────────────
@@ -86,10 +85,13 @@ export default function AgentViewer() {
 
   // ── WebSocket connection with auto-reconnect ─────────────────
   useEffect(() => {
-    mountedRef.current = true;
+    // Local flag — each effect instance owns its own cancelled state.
+    // Unlike a ref, this can't be reset by a subsequent remount, which
+    // would cause the old onclose to spawn a duplicate connection.
+    let cancelled = false;
 
     function connectWs() {
-      if (!mountedRef.current) return;
+      if (cancelled) return;
 
       const ws = new WebSocket(`ws://${window.location.host}/ws`);
       wsRef.current = ws;
@@ -103,7 +105,7 @@ export default function AgentViewer() {
       ws.onclose = () => {
         setWsConnected(false);
         console.log('[AgentViewer] WebSocket disconnected');
-        if (!mountedRef.current) return;
+        if (cancelled) return;
         // Exponential backoff: 1s, 2s, 4s, 8s, max 10s
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
         reconnectAttemptsRef.current++;
@@ -173,7 +175,7 @@ export default function AgentViewer() {
     connectWs();
 
     return () => {
-      mountedRef.current = false;
+      cancelled = true;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       wsRef.current?.close();
     };
